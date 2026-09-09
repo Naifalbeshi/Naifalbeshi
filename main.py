@@ -2,6 +2,7 @@ import os
 import threading
 from flask import Flask
 import yfinance as yf
+import pandas as pd
 import pandas_ta as ta
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -9,7 +10,6 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 ALLOWED_USER_ID = int(os.getenv("ALLOWED_USER_ID", "0"))
 
-# هذا سيرفر وهمي عشان Render يشوف انك شغال
 app_flask = Flask(__name__)
 @app_flask.route('/')
 def home():
@@ -29,12 +29,34 @@ async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("جاري الفحص...")
     try:
-        data = yf.download("BTC-USD", period="1d", interval="15m")
+        # تحميل البيانات مع اصلاح مشكلة MultiIndex
+        data = yf.download("BTC-USD", period="1d", interval="15m", auto_adjust=True, progress=False)
+        
+        if data.empty:
+            await update.message.reply_text("لا يوجد بيانات حالياً")
+            return
+
+        # === هذا هو الحل السحري ===
+        # فك الـ MultiIndex اللي ترسله yfinance الجديدة
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+        
+        # تأكد ان الأعمدة نصوص عادية
+        data.columns = [str(c).replace(' ', '_') for c in data.columns]
+
+        # حساب RSI
         data.ta.rsi(length=14, append=True)
-        last_rsi = data['RSI_14'].iloc[-1]
-        price = data['Close'].iloc[-1]
+        
+        if 'RSI_14' not in data.columns:
+            await update.message.reply_text("خطأ: لم يتم حساب RSI")
+            return
+
+        last_rsi = data['RSI_14'].dropna().iloc[-1]
+        price = data['Close'].dropna().iloc[-1]
+        
         msg = f"BTC: {price:.2f}\nRSI: {last_rsi:.2f}"
         await update.message.reply_text(msg)
+        
     except Exception as e:
         await update.message.reply_text(f"خطأ: {e}")
 
@@ -47,3 +69,4 @@ def run_bot():
 if __name__ == "__main__":
     threading.Thread(target=run_flask).start()
     run_bot()
+    
