@@ -4,3 +4,4 @@ openpyxl
 gunicorn
 flask
 yfinance
+pandas_ta
